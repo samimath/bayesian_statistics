@@ -1,0 +1,1492 @@
+---
+title: "U20 Math 559 Bayesian Statistics Homework 2"
+date: 'Due: 3/27/2021'
+output:
+  word_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*Instruction*: Please type or write your answers clearly and show your work. You are encouraged to use the Rmarkdown version of this assignment as a template to submit your work. Unless stated otherwise, all programming references in the assignment will be in `R`, and the predefined `R` functions used for the problems can all be found on our Canvas site under `DBDA2Eprograms.zip`, unless specified otherwise. For this assignment, problems roughly covers content from lectures 4-6.
+
+
+**Problem 1** 
+
+At the end of the script `BernMetrop.R`, add these lines:
+
+```{r,eval=FALSE}
+
+library(coda)
+library(runjags)
+#openGraph(height=7,width=3.5)
+#layout(matrix(1:2,nrow=2))
+acf( acceptedTraj , lag.max=30 , col="skyblue" , lwd=3 )
+Len = length( acceptedTraj )
+Lag = 10
+trajHead = acceptedTraj[  1      : (Len-Lag) ]
+trajTail = acceptedTraj[ (1+Lag) :  Len      ]
+plot( trajHead , trajTail , pch="." , col="skyblue" ,
+      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                         lag == .(Lag) ,
+                         cor == .(round(cor(trajHead,trajTail),3)))) )
+                         
+```
+
+a) Before each line, add a comment that explains what the line does. Include the commented code in your write-up.
+```{r, echo = FALSE}
+
+HDIofMCMC = function( sampleVec , credMass=0.95 ) {
+  # Computes highest density interval from a sample of representative values,
+  #   estimated as shortest credible interval.
+  # Arguments:
+  #   sampleVec
+  #     is a vector of representative values from a probability distribution.
+  #   credMass
+  #     is a scalar between 0 and 1, indicating the mass within the credible
+  #     interval that is to be estimated.
+  # Value:
+  #   HDIlim is a vector containing the limits of the HDI
+  sortedPts = sort( sampleVec )
+  ciIdxInc = ceiling( credMass * length( sortedPts ) )
+  nCIs = length( sortedPts ) - ciIdxInc
+  ciWidth = rep( 0 , nCIs )
+  for ( i in 1:nCIs ) {
+    ciWidth[ i ] = sortedPts[ i + ciIdxInc ] - sortedPts[ i ]
+  }
+  HDImin = sortedPts[ which.min( ciWidth ) ]
+  HDImax = sortedPts[ which.min( ciWidth ) + ciIdxInc ]
+  HDIlim = c( HDImin , HDImax )
+  return( HDIlim )
+}
+
+plotPost = function( paramSampleVec , cenTend=c("mode","median","mean")[1] , 
+                     compVal=NULL, ROPE=NULL, credMass=0.95, HDItextPlace=0.7, 
+                     xlab=NULL , xlim=NULL , yaxt=NULL , ylab=NULL , 
+                     main=NULL , cex=NULL , cex.lab=NULL ,
+                     col=NULL , border=NULL , showCurve=FALSE , breaks=NULL , 
+                     ... ) {
+  # Override defaults of hist function, if not specified by user:
+  # (additional arguments "..." are passed to the hist function)
+  if ( is.null(xlab) ) xlab="Param. Val."
+  if ( is.null(cex.lab) ) cex.lab=1.5
+  if ( is.null(cex) ) cex=1.4
+  if ( is.null(xlim) ) xlim=range( c( compVal , ROPE , paramSampleVec ) )
+  if ( is.null(main) ) main=""
+  if ( is.null(yaxt) ) yaxt="n"
+  if ( is.null(ylab) ) ylab=""
+  if ( is.null(col) ) col="skyblue"
+  if ( is.null(border) ) border="white"
+  
+  # convert coda object to matrix:
+  if ( class(paramSampleVec) == "mcmc.list" ) {
+    paramSampleVec = as.matrix(paramSampleVec)
+  }
+  
+  summaryColNames = c("ESS","mean","median","mode",
+                      "hdiMass","hdiLow","hdiHigh",
+                      "compVal","pGtCompVal",
+                      "ROPElow","ROPEhigh","pLtROPE","pInROPE","pGtROPE")
+  postSummary = matrix( NA , nrow=1 , ncol=length(summaryColNames) , 
+                        dimnames=list( c( xlab ) , summaryColNames ) )
+  
+  # require(coda) # for effectiveSize function
+  postSummary[,"ESS"] = effectiveSize(paramSampleVec)
+  
+  postSummary[,"mean"] = mean(paramSampleVec)
+  postSummary[,"median"] = median(paramSampleVec)
+  mcmcDensity = density(paramSampleVec)
+  postSummary[,"mode"] = mcmcDensity$x[which.max(mcmcDensity$y)]
+  
+  HDI = HDIofMCMC( paramSampleVec , credMass )
+  postSummary[,"hdiMass"]=credMass
+  postSummary[,"hdiLow"]=HDI[1]
+  postSummary[,"hdiHigh"]=HDI[2]
+  
+  # Plot histogram.
+  cvCol = "darkgreen"
+  ropeCol = "darkred"
+  if ( is.null(breaks) ) {
+    if ( max(paramSampleVec) > min(paramSampleVec) ) {
+      breaks = c( seq( from=min(paramSampleVec) , to=max(paramSampleVec) ,
+                       by=(HDI[2]-HDI[1])/18 ) , max(paramSampleVec) )
+    } else {
+      breaks=c(min(paramSampleVec)-1.0E-6,max(paramSampleVec)+1.0E-6)
+      border="skyblue"
+    }
+  }
+  if ( !showCurve ) {
+    par(xpd=NA)
+    histinfo = hist( paramSampleVec , xlab=xlab , yaxt=yaxt , ylab=ylab ,
+                     freq=F , border=border , col=col ,
+                     xlim=xlim , main=main , cex=cex , cex.lab=cex.lab ,
+                     breaks=breaks , ... )
+  }
+  if ( showCurve ) {
+    par(xpd=NA)
+    histinfo = hist( paramSampleVec , plot=F )
+    densCurve = density( paramSampleVec , adjust=2 )
+    plot( densCurve$x , densCurve$y , type="l" , lwd=5 , col=col , bty="n" ,
+          xlim=xlim , xlab=xlab , yaxt=yaxt , ylab=ylab ,
+          main=main , cex=cex , cex.lab=cex.lab , ... )
+  }
+  cenTendHt = 0.9*max(histinfo$density)
+  cvHt = 0.7*max(histinfo$density)
+  ROPEtextHt = 0.55*max(histinfo$density)
+  # Display central tendency:
+  mn = mean(paramSampleVec)
+  med = median(paramSampleVec)
+  mcmcDensity = density(paramSampleVec)
+  mo = mcmcDensity$x[which.max(mcmcDensity$y)]
+  if ( cenTend=="mode" ){ 
+    text( mo , cenTendHt ,
+          bquote(mode==.(signif(mo,3))) , adj=c(.5,0) , cex=cex )
+  }
+  if ( cenTend=="median" ){ 
+    text( med , cenTendHt ,
+          bquote(median==.(signif(med,3))) , adj=c(.5,0) , cex=cex , col=cvCol )
+  }
+  if ( cenTend=="mean" ){ 
+    text( mn , cenTendHt ,
+          bquote(mean==.(signif(mn,3))) , adj=c(.5,0) , cex=cex )
+  }
+  # Display the comparison value.
+  if ( !is.null( compVal ) ) {
+    pGtCompVal = sum( paramSampleVec > compVal ) / length( paramSampleVec ) 
+    pLtCompVal = 1 - pGtCompVal
+    lines( c(compVal,compVal) , c(0.96*cvHt,0) , 
+           lty="dotted" , lwd=2 , col=cvCol )
+    text( compVal , cvHt ,
+          bquote( .(round(100*pLtCompVal,1)) * "% < " *
+                   .(signif(compVal,3)) * " < " * 
+                   .(round(100*pGtCompVal,1)) * "%" ) ,
+          adj=c(pLtCompVal,0) , cex=0.8*cex , col=cvCol )
+    postSummary[,"compVal"] = compVal
+    postSummary[,"pGtCompVal"] = pGtCompVal
+  }
+  # Display the ROPE.
+  if ( !is.null( ROPE ) ) {
+    pInROPE = ( sum( paramSampleVec > ROPE[1] & paramSampleVec < ROPE[2] )
+                / length( paramSampleVec ) )
+    pGtROPE = ( sum( paramSampleVec >= ROPE[2] ) / length( paramSampleVec ) )
+    pLtROPE = ( sum( paramSampleVec <= ROPE[1] ) / length( paramSampleVec ) )
+    lines( c(ROPE[1],ROPE[1]) , c(0.96*ROPEtextHt,0) , lty="dotted" , lwd=2 ,
+           col=ropeCol )
+    lines( c(ROPE[2],ROPE[2]) , c(0.96*ROPEtextHt,0) , lty="dotted" , lwd=2 ,
+           col=ropeCol)
+    text( mean(ROPE) , ROPEtextHt ,
+          bquote( .(round(100*pLtROPE,1)) * "% < " * .(ROPE[1]) * " < " * 
+                   .(round(100*pInROPE,1)) * "% < " * .(ROPE[2]) * " < " * 
+                   .(round(100*pGtROPE,1)) * "%" ) ,
+          adj=c(pLtROPE+.5*pInROPE,0) , cex=1 , col=ropeCol )
+    
+    postSummary[,"ROPElow"]=ROPE[1] 
+    postSummary[,"ROPEhigh"]=ROPE[2] 
+    postSummary[,"pLtROPE"]=pLtROPE
+    postSummary[,"pInROPE"]=pInROPE
+    postSummary[,"pGtROPE"]=pGtROPE
+  }
+  # Display the HDI.
+  lines( HDI , c(0,0) , lwd=4 , lend=1 )
+  text( mean(HDI) , 0 , bquote(.(100*credMass) * "% HDI" ) ,
+        adj=c(.5,-1.7) , cex=cex )
+  text( HDI[1] , 0 , bquote(.(signif(HDI[1],3))) ,
+        adj=c(HDItextPlace,-0.5) , cex=cex )
+  text( HDI[2] , 0 , bquote(.(signif(HDI[2],3))) ,
+        adj=c(1.0-HDItextPlace,-0.5) , cex=cex )
+  par(xpd=F)
+  #
+  return( postSummary )
+}
+
+
+# Specify the data, to be used in the likelihood function.
+myData = c(rep(0,6),rep(1,14))
+
+# Define the Bernoulli likelihood function, p(D|theta).
+# The argument theta could be a vector, not just a scalar.
+likelihood = function( theta , data ) {
+  z = sum( data )
+  N = length( data )
+  pDataGivenTheta = theta^z * (1-theta)^(N-z)
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The likelihood for theta > 1 or for theta < 0 is zero:
+  pDataGivenTheta[ theta > 1 | theta < 0 ] = 0
+  return( pDataGivenTheta )
+}
+
+# Define the prior density function. 
+prior = function( theta ) {
+  pTheta = dbeta( theta , 1 , 1 )
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The prior for theta > 1 or for theta < 0 is zero:
+  pTheta[ theta > 1 | theta < 0 ] = 0
+  return( pTheta )
+}
+
+# Define the relative probability of the target distribution, 
+# as a function of vector theta. For our application, this
+# target distribution is the unnormalized posterior distribution.
+targetRelProb = function( theta , data ) {
+  targetRelProb =  likelihood( theta , data ) * prior( theta )
+  return( targetRelProb )
+}
+
+# Specify the length of the trajectory, i.e., the number of jumps to try:
+trajLength = 50000 # arbitrary large number
+# Initialize the vector that will store the results:
+trajectory = rep( 0 , trajLength )
+# Specify where to start the trajectory:
+trajectory[1] = 0.01 # arbitrary value
+# Specify the burn-in period:
+burnIn = ceiling( 0.0 * trajLength ) # arbitrary number, less than trajLength
+# Initialize accepted, rejected counters, just to monitor performance:
+nAccepted = 0
+nRejected = 0
+
+# Now generate the random walk. The 't' index is time or trial in the walk.
+# Specify seed to reproduce same random walk:
+set.seed(47405)
+# Specify standard deviation of proposal distribution:
+proposalSD = c(0.02,0.2,2.0)[2]
+for ( t in 1:(trajLength-1) ) {
+	currentPosition = trajectory[t]
+	# Use the proposal distribution to generate a proposed jump.
+	proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+	# Compute the probability of accepting the proposed jump.
+	probAccept = min( 1,
+		targetRelProb( currentPosition + proposedJump , myData )
+		/ targetRelProb( currentPosition , myData ) )
+	# Generate a random uniform value from the interval [0,1] to
+	# decide whether or not to accept the proposed jump.
+	if ( runif(1) < probAccept ) {
+		# accept the proposed jump
+		trajectory[ t+1 ] = currentPosition + proposedJump
+		# increment the accepted counter, just to monitor performance
+		if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+	} else {
+		# reject the proposed jump, stay at current position
+		trajectory[ t+1 ] = currentPosition
+		# increment the rejected counter, just to monitor performance
+		if ( t > burnIn ) { nRejected = nRejected + 1 }
+	}
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+
+# End of Metropolis algorithm.
+
+#-----------------------------------------------------------------------
+# Display the chain.
+
+#openGraph(width=4,height=8)
+layout( matrix(1:3,nrow=3) )
+par(mar=c(3,4,2,1),mgp=c(2,0.7,0))
+
+# Posterior histogram:
+paramInfo = plotPost( acceptedTraj , xlim=c(0,1) , xlab=bquote(theta) , 
+                      cex.main=2.0 ,
+                      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                      "Eff.Sz." == .(round(effectiveSize(acceptedTraj),1)) ) ) )
+
+# Trajectory, a.k.a. trace plot, end of chain:
+idxToPlot = (trajLength-100):trajLength
+plot( trajectory[idxToPlot] , idxToPlot , main="End of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Display proposal SD and acceptance ratio in the plot.
+text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 ,
+      labels = bquote( frac(N[acc],N[pro]) == 
+                       .(signif( nAccepted/length(acceptedTraj) , 3 ))))
+
+# Trajectory, a.k.a. trace plot, beginning of chain:
+idxToPlot = 1:100
+plot( trajectory[idxToPlot] , idxToPlot , main="Beginning of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Indicate burn in limit (might not be visible if not in range):
+if ( burnIn > 0 ) {
+  abline(h=burnIn,lty="dotted")
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) )
+}
+
+#saveGraph( file=paste0( fileNameRoot , 
+#                        "SD" , proposalSD ,
+#                        "Init" , trajectory[1] ) , type="eps" )
+
+#------------------------------------------------------------------------
+```
+
+
+```{r}
+#open window for graph
+#openGraph(height=7,width=3.5) #commented it out bc can't figure out how to look at it 
+#show two panels in graph
+#layout(matrix(1:2,nrow=2)) #not working as intended 
+#compute the autocorrelation function with lag 0 to 30 and then plot
+acf( acceptedTraj , lag.max=30 , col="skyblue" , lwd=3 )
+#length of trajectory
+Len = length( acceptedTraj )
+#set lag value to 10
+Lag = 10
+#creates vector of all but last lag sample from posterior 
+trajHead = acceptedTraj[  1      : (Len-Lag) ]
+#creates vector of all but the first lag sample from posterior
+trajTail = acceptedTraj[ (1+Lag) :  Len      ]
+#creates scatterplot of original values vs lag steps and include correlation figure in title 
+plot( trajHead , trajTail , pch="." , col="skyblue" ,
+      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                         lag == .(Lag) ,
+                         cor == .(round(cor(trajHead,trajTail),3)))) )
+```
+
+
+
+b) Repeat the previous exercise, with the lines above appended to the script. Include the resulting new graphs in your write-up. For each run, verify that the height of the ACF bar at the specified lag matches the correlation in the scatterplot.
+```{r}
+
+#openGraph(height=7,width=3.5)
+#layout(matrix(1:2,nrow=2))
+acf( acceptedTraj , lag.max=30 , col="skyblue" , lwd=3 )
+Len = length( acceptedTraj )
+Lag = 10
+trajHead = acceptedTraj[  1      : (Len-Lag) ]
+trajTail = acceptedTraj[ (1+Lag) :  Len      ]
+plot( trajHead , trajTail , pch="." , col="skyblue" ,
+      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                         lag == .(Lag) ,
+                         cor == .(round(cor(trajHead,trajTail),3)))) )
+   
+
+```
+In the first set of charts, each step moves a fair amount from its previous position. Therefore the autocorrelation is moderate. In the ACF plot, the bar at Lag=10 has a height of about 0, which can be by cor=0.018 in the second chart. 
+
+
+c) When the proposal distribution has SD = 2, why does the scatter plot have a dense line of points on the diagonal? 
+```{r}
+proposalSD = 2
+for ( t in 1:(trajLength-1) ) {
+	currentPosition = trajectory[t]
+	# Use the proposal distribution to generate a proposed jump.
+	proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+	# Compute the probability of accepting the proposed jump.
+	probAccept = min( 1,
+		targetRelProb( currentPosition + proposedJump , myData )
+		/ targetRelProb( currentPosition , myData ) )
+	# Generate a random uniform value from the interval [0,1] to
+	# decide whether or not to accept the proposed jump.
+	if ( runif(1) < probAccept ) {
+		# accept the proposed jump
+		trajectory[ t+1 ] = currentPosition + proposedJump
+		# increment the accepted counter, just to monitor performance
+		if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+	} else {
+		# reject the proposed jump, stay at current position
+		trajectory[ t+1 ] = currentPosition
+		# increment the rejected counter, just to monitor performance
+		if ( t > burnIn ) { nRejected = nRejected + 1 }
+	}
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+
+# End of Metropolis algorithm.
+
+#-----------------------------------------------------------------------
+# Display the chain.
+
+#openGraph(width=4,height=8)
+layout( matrix(1:3,nrow=3) )
+par(mar=c(3,4,2,1),mgp=c(2,0.7,0))
+
+# Posterior histogram:
+paramInfo = plotPost( acceptedTraj , xlim=c(0,1) , xlab=bquote(theta) , 
+                      cex.main=2.0 ,
+                      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                      "Eff.Sz." == .(round(effectiveSize(acceptedTraj),1)) ) ) )
+
+# Trajectory, a.k.a. trace plot, end of chain:
+idxToPlot = (trajLength-100):trajLength
+plot( trajectory[idxToPlot] , idxToPlot , main="End of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Display proposal SD and acceptance ratio in the plot.
+text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 ,
+      labels = bquote( frac(N[acc],N[pro]) == 
+                       .(signif( nAccepted/length(acceptedTraj) , 3 ))))
+
+# Trajectory, a.k.a. trace plot, beginning of chain:
+idxToPlot = 1:100
+plot( trajectory[idxToPlot] , idxToPlot , main="Beginning of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Indicate burn in limit (might not be visible if not in range):
+if ( burnIn > 0 ) {
+  abline(h=burnIn,lty="dotted")
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) )
+}
+  
+
+#openGraph(height=7,width=3.5)
+#layout(matrix(1:2,nrow=2))
+acf( acceptedTraj , lag.max=30 , col="skyblue" , lwd=3 )
+Len = length( acceptedTraj )
+Lag = 10
+trajHead = acceptedTraj[  1      : (Len-Lag) ]
+trajTail = acceptedTraj[ (1+Lag) :  Len      ]
+plot( trajHead , trajTail , pch="." , col="skyblue" ,
+      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                         lag == .(Lag) ,
+                         cor == .(round(cor(trajHead,trajTail),3)))) )
+
+```
+
+The scatterplot has a dense line of points on the diagonal when SD = 2 because the steps in the trajectory have equal values. 
+
+
+**Problem 2**
+
+Consider a prior distribution on coin bias that puts most credibility at 0.0, 0.5, and 1.0, which we will formulate as $p(\theta) = \frac{(\cos(4\pi\theta) + 1)^2}{1.5}$. 
+
+a) Plot the prior as a function of $\theta.$
+```{r}
+theta <- seq(0, 1, length = 1000)
+plot(theta, ((cos(4 * pi * theta) + 1)^2) / 1.5, type = "l")
+```
+
+
+b) In the script `BernMetrop.R`, find the function definition that specifies the prior distribution, replace it with the function defined in part a), set `myData = c()`. and run the script, using a proposal SD=0.2. Include the graphical output in your write-up. Does the histogram of the trajectory look like the graph of the previous part of the exercise?
+```{r}
+
+
+HDIofMCMC = function( sampleVec , credMass=0.95 ) {
+  # Computes highest density interval from a sample of representative values,
+  #   estimated as shortest credible interval.
+  # Arguments:
+  #   sampleVec
+  #     is a vector of representative values from a probability distribution.
+  #   credMass
+  #     is a scalar between 0 and 1, indicating the mass within the credible
+  #     interval that is to be estimated.
+  # Value:
+  #   HDIlim is a vector containing the limits of the HDI
+  sortedPts = sort( sampleVec )
+  ciIdxInc = ceiling( credMass * length( sortedPts ) )
+  nCIs = length( sortedPts ) - ciIdxInc
+  ciWidth = rep( 0 , nCIs )
+  for ( i in 1:nCIs ) {
+    ciWidth[ i ] = sortedPts[ i + ciIdxInc ] - sortedPts[ i ]
+  }
+  HDImin = sortedPts[ which.min( ciWidth ) ]
+  HDImax = sortedPts[ which.min( ciWidth ) + ciIdxInc ]
+  HDIlim = c( HDImin , HDImax )
+  return( HDIlim )
+}
+
+plotPost = function( paramSampleVec , cenTend=c("mode","median","mean")[1] , 
+                     compVal=NULL, ROPE=NULL, credMass=0.95, HDItextPlace=0.7, 
+                     xlab=NULL , xlim=NULL , yaxt=NULL , ylab=NULL , 
+                     main=NULL , cex=NULL , cex.lab=NULL ,
+                     col=NULL , border=NULL , showCurve=FALSE , breaks=NULL , 
+                     ... ) {
+  # Override defaults of hist function, if not specified by user:
+  # (additional arguments "..." are passed to the hist function)
+  if ( is.null(xlab) ) xlab="Param. Val."
+  if ( is.null(cex.lab) ) cex.lab=1.5
+  if ( is.null(cex) ) cex=1.4
+  if ( is.null(xlim) ) xlim=range( c( compVal , ROPE , paramSampleVec ) )
+  if ( is.null(main) ) main=""
+  if ( is.null(yaxt) ) yaxt="n"
+  if ( is.null(ylab) ) ylab=""
+  if ( is.null(col) ) col="skyblue"
+  if ( is.null(border) ) border="white"
+  
+  # convert coda object to matrix:
+  if ( class(paramSampleVec) == "mcmc.list" ) {
+    paramSampleVec = as.matrix(paramSampleVec)
+  }
+  
+  summaryColNames = c("ESS","mean","median","mode",
+                      "hdiMass","hdiLow","hdiHigh",
+                      "compVal","pGtCompVal",
+                      "ROPElow","ROPEhigh","pLtROPE","pInROPE","pGtROPE")
+  postSummary = matrix( NA , nrow=1 , ncol=length(summaryColNames) , 
+                        dimnames=list( c( xlab ) , summaryColNames ) )
+  
+  # require(coda) # for effectiveSize function
+  postSummary[,"ESS"] = effectiveSize(paramSampleVec)
+  
+  postSummary[,"mean"] = mean(paramSampleVec)
+  postSummary[,"median"] = median(paramSampleVec)
+  mcmcDensity = density(paramSampleVec)
+  postSummary[,"mode"] = mcmcDensity$x[which.max(mcmcDensity$y)]
+  
+  HDI = HDIofMCMC( paramSampleVec , credMass )
+  postSummary[,"hdiMass"]=credMass
+  postSummary[,"hdiLow"]=HDI[1]
+  postSummary[,"hdiHigh"]=HDI[2]
+  
+  # Plot histogram.
+  cvCol = "darkgreen"
+  ropeCol = "darkred"
+  if ( is.null(breaks) ) {
+    if ( max(paramSampleVec) > min(paramSampleVec) ) {
+      breaks = c( seq( from=min(paramSampleVec) , to=max(paramSampleVec) ,
+                       by=(HDI[2]-HDI[1])/18 ) , max(paramSampleVec) )
+    } else {
+      breaks=c(min(paramSampleVec)-1.0E-6,max(paramSampleVec)+1.0E-6)
+      border="skyblue"
+    }
+  }
+  if ( !showCurve ) {
+    par(xpd=NA)
+    histinfo = hist( paramSampleVec , xlab=xlab , yaxt=yaxt , ylab=ylab ,
+                     freq=F , border=border , col=col ,
+                     xlim=xlim , main=main , cex=cex , cex.lab=cex.lab ,
+                     breaks=breaks , ... )
+  }
+  if ( showCurve ) {
+    par(xpd=NA)
+    histinfo = hist( paramSampleVec , plot=F )
+    densCurve = density( paramSampleVec , adjust=2 )
+    plot( densCurve$x , densCurve$y , type="l" , lwd=5 , col=col , bty="n" ,
+          xlim=xlim , xlab=xlab , yaxt=yaxt , ylab=ylab ,
+          main=main , cex=cex , cex.lab=cex.lab , ... )
+  }
+  cenTendHt = 0.9*max(histinfo$density)
+  cvHt = 0.7*max(histinfo$density)
+  ROPEtextHt = 0.55*max(histinfo$density)
+  # Display central tendency:
+  mn = mean(paramSampleVec)
+  med = median(paramSampleVec)
+  mcmcDensity = density(paramSampleVec)
+  mo = mcmcDensity$x[which.max(mcmcDensity$y)]
+  if ( cenTend=="mode" ){ 
+    text( mo , cenTendHt ,
+          bquote(mode==.(signif(mo,3))) , adj=c(.5,0) , cex=cex )
+  }
+  if ( cenTend=="median" ){ 
+    text( med , cenTendHt ,
+          bquote(median==.(signif(med,3))) , adj=c(.5,0) , cex=cex , col=cvCol )
+  }
+  if ( cenTend=="mean" ){ 
+    text( mn , cenTendHt ,
+          bquote(mean==.(signif(mn,3))) , adj=c(.5,0) , cex=cex )
+  }
+  # Display the comparison value.
+  if ( !is.null( compVal ) ) {
+    pGtCompVal = sum( paramSampleVec > compVal ) / length( paramSampleVec ) 
+    pLtCompVal = 1 - pGtCompVal
+    lines( c(compVal,compVal) , c(0.96*cvHt,0) , 
+           lty="dotted" , lwd=2 , col=cvCol )
+    text( compVal , cvHt ,
+          bquote( .(round(100*pLtCompVal,1)) * "% < " *
+                   .(signif(compVal,3)) * " < " * 
+                   .(round(100*pGtCompVal,1)) * "%" ) ,
+          adj=c(pLtCompVal,0) , cex=0.8*cex , col=cvCol )
+    postSummary[,"compVal"] = compVal
+    postSummary[,"pGtCompVal"] = pGtCompVal
+  }
+  # Display the ROPE.
+  if ( !is.null( ROPE ) ) {
+    pInROPE = ( sum( paramSampleVec > ROPE[1] & paramSampleVec < ROPE[2] )
+                / length( paramSampleVec ) )
+    pGtROPE = ( sum( paramSampleVec >= ROPE[2] ) / length( paramSampleVec ) )
+    pLtROPE = ( sum( paramSampleVec <= ROPE[1] ) / length( paramSampleVec ) )
+    lines( c(ROPE[1],ROPE[1]) , c(0.96*ROPEtextHt,0) , lty="dotted" , lwd=2 ,
+           col=ropeCol )
+    lines( c(ROPE[2],ROPE[2]) , c(0.96*ROPEtextHt,0) , lty="dotted" , lwd=2 ,
+           col=ropeCol)
+    text( mean(ROPE) , ROPEtextHt ,
+          bquote( .(round(100*pLtROPE,1)) * "% < " * .(ROPE[1]) * " < " * 
+                   .(round(100*pInROPE,1)) * "% < " * .(ROPE[2]) * " < " * 
+                   .(round(100*pGtROPE,1)) * "%" ) ,
+          adj=c(pLtROPE+.5*pInROPE,0) , cex=1 , col=ropeCol )
+    
+    postSummary[,"ROPElow"]=ROPE[1] 
+    postSummary[,"ROPEhigh"]=ROPE[2] 
+    postSummary[,"pLtROPE"]=pLtROPE
+    postSummary[,"pInROPE"]=pInROPE
+    postSummary[,"pGtROPE"]=pGtROPE
+  }
+  # Display the HDI.
+  lines( HDI , c(0,0) , lwd=4 , lend=1 )
+  text( mean(HDI) , 0 , bquote(.(100*credMass) * "% HDI" ) ,
+        adj=c(.5,-1.7) , cex=cex )
+  text( HDI[1] , 0 , bquote(.(signif(HDI[1],3))) ,
+        adj=c(HDItextPlace,-0.5) , cex=cex )
+  text( HDI[2] , 0 , bquote(.(signif(HDI[2],3))) ,
+        adj=c(1.0-HDItextPlace,-0.5) , cex=cex )
+  par(xpd=F)
+  #
+  return( postSummary )
+}
+
+
+# Specify the data, to be used in the likelihood function.
+myData = c()
+
+# Define the Bernoulli likelihood function, p(D|theta).
+# The argument theta could be a vector, not just a scalar.
+likelihood = function( theta , data ) {
+  z = sum( data )
+  N = length( data )
+  pDataGivenTheta = theta^z * (1-theta)^(N-z)
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The likelihood for theta > 1 or for theta < 0 is zero:
+  pDataGivenTheta[ theta > 1 | theta < 0 ] = 0
+  return( pDataGivenTheta )
+}
+
+# Define the prior density function. 
+prior = function( theta ) {
+  #pTheta = dbeta( theta , 1 , 1 )
+  pTheta = ((cos(4 * pi * theta) + 1)^2) / 1.5
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The prior for theta > 1 or for theta < 0 is zero:
+  pTheta[ theta > 1 | theta < 0 ] = 0
+  return( pTheta )
+}
+
+# Define the relative probability of the target distribution, 
+# as a function of vector theta. For our application, this
+# target distribution is the unnormalized posterior distribution.
+targetRelProb = function( theta , data ) {
+  targetRelProb =  likelihood( theta , data ) * prior( theta )
+  return( targetRelProb )
+}
+
+# Specify the length of the trajectory, i.e., the number of jumps to try:
+trajLength = 50000 # arbitrary large number
+# Initialize the vector that will store the results:
+trajectory = rep( 0 , trajLength )
+# Specify where to start the trajectory:
+trajectory[1] = 0.01 # arbitrary value
+# Specify the burn-in period:
+burnIn = ceiling( 0.0 * trajLength ) # arbitrary number, less than trajLength
+# Initialize accepted, rejected counters, just to monitor performance:
+nAccepted = 0
+nRejected = 0
+
+# Now generate the random walk. The 't' index is time or trial in the walk.
+# Specify seed to reproduce same random walk:
+set.seed(47405)
+# Specify standard deviation of proposal distribution:
+proposalSD = 0.2
+for ( t in 1:(trajLength-1) ) {
+	currentPosition = trajectory[t]
+	# Use the proposal distribution to generate a proposed jump.
+	proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+	# Compute the probability of accepting the proposed jump.
+	probAccept = min( 1,
+		targetRelProb( currentPosition + proposedJump , myData )
+		/ targetRelProb( currentPosition , myData ) )
+	# Generate a random uniform value from the interval [0,1] to
+	# decide whether or not to accept the proposed jump.
+	if ( runif(1) < probAccept ) {
+		# accept the proposed jump
+		trajectory[ t+1 ] = currentPosition + proposedJump
+		# increment the accepted counter, just to monitor performance
+		if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+	} else {
+		# reject the proposed jump, stay at current position
+		trajectory[ t+1 ] = currentPosition
+		# increment the rejected counter, just to monitor performance
+		if ( t > burnIn ) { nRejected = nRejected + 1 }
+	}
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+
+# End of Metropolis algorithm.
+
+#-----------------------------------------------------------------------
+# Display the chain.
+
+#openGraph(width=4,height=8)
+layout( matrix(1:3,nrow=3) )
+par(mar=c(3,4,2,1),mgp=c(2,0.7,0))
+
+# Posterior histogram:
+paramInfo = plotPost( acceptedTraj , xlim=c(0,1) , xlab=bquote(theta) , 
+                      cex.main=2.0 ,
+                      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                      "Eff.Sz." == .(round(effectiveSize(acceptedTraj),1)) ) ) )
+
+
+# Trajectory, a.k.a. trace plot, end of chain:
+idxToPlot = (trajLength-100):trajLength
+plot( trajectory[idxToPlot] , idxToPlot , main="End of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Display proposal SD and acceptance ratio in the plot.
+text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 ,
+      labels = bquote( frac(N[acc],N[pro]) == 
+                       .(signif( nAccepted/length(acceptedTraj) , 3 ))))
+
+# Trajectory, a.k.a. trace plot, beginning of chain:
+idxToPlot = 1:100
+plot( trajectory[idxToPlot] , idxToPlot , main="Beginning of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Indicate burn in limit (might not be visible if not in range):
+if ( burnIn > 0 ) {
+  abline(h=burnIn,lty="dotted")
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) )
+}
+
+```
+The histogram of the trajectory does look like the trimodal prior distribution graphed in the previous part. 
+
+
+c) Repeat the previous part but now with `myData = c(0,1,1)`. Include the graphical output in your write-up. Does the posterior distribution make sense? Explain why.
+```{r}
+myData = c(0,1,1)
+
+
+# Define the Bernoulli likelihood function, p(D|theta).
+# The argument theta could be a vector, not just a scalar.
+likelihood = function( theta , data ) {
+  z = sum( data )
+  N = length( data )
+  pDataGivenTheta = theta^z * (1-theta)^(N-z)
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The likelihood for theta > 1 or for theta < 0 is zero:
+  pDataGivenTheta[ theta > 1 | theta < 0 ] = 0
+  return( pDataGivenTheta )
+}
+
+# Define the prior density function. 
+prior = function( theta ) {
+  #pTheta = dbeta( theta , 1 , 1 )
+  pTheta = ((cos(4 * pi * theta) + 1)^2) / 1.5
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The prior for theta > 1 or for theta < 0 is zero:
+  pTheta[ theta > 1 | theta < 0 ] = 0
+  return( pTheta )
+}
+
+# Define the relative probability of the target distribution, 
+# as a function of vector theta. For our application, this
+# target distribution is the unnormalized posterior distribution.
+targetRelProb = function( theta , data ) {
+  targetRelProb =  likelihood( theta , data ) * prior( theta )
+  return( targetRelProb )
+}
+
+# Specify the length of the trajectory, i.e., the number of jumps to try:
+trajLength = 50000 # arbitrary large number
+# Initialize the vector that will store the results:
+trajectory = rep( 0 , trajLength )
+# Specify where to start the trajectory:
+trajectory[1] = 0.01 # arbitrary value
+# Specify the burn-in period:
+burnIn = ceiling( 0.0 * trajLength ) # arbitrary number, less than trajLength
+# Initialize accepted, rejected counters, just to monitor performance:
+nAccepted = 0
+nRejected = 0
+
+# Now generate the random walk. The 't' index is time or trial in the walk.
+# Specify seed to reproduce same random walk:
+set.seed(47405)
+# Specify standard deviation of proposal distribution:
+proposalSD = 0.2
+for ( t in 1:(trajLength-1) ) {
+	currentPosition = trajectory[t]
+	# Use the proposal distribution to generate a proposed jump.
+	proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+	# Compute the probability of accepting the proposed jump.
+	probAccept = min( 1,
+		targetRelProb( currentPosition + proposedJump , myData )
+		/ targetRelProb( currentPosition , myData ) )
+	# Generate a random uniform value from the interval [0,1] to
+	# decide whether or not to accept the proposed jump.
+	if ( runif(1) < probAccept ) {
+		# accept the proposed jump
+		trajectory[ t+1 ] = currentPosition + proposedJump
+		# increment the accepted counter, just to monitor performance
+		if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+	} else {
+		# reject the proposed jump, stay at current position
+		trajectory[ t+1 ] = currentPosition
+		# increment the rejected counter, just to monitor performance
+		if ( t > burnIn ) { nRejected = nRejected + 1 }
+	}
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+
+# End of Metropolis algorithm.
+
+#-----------------------------------------------------------------------
+# Display the chain.
+
+#openGraph(width=4,height=8)
+layout( matrix(1:3,nrow=3) )
+par(mar=c(3,4,2,1),mgp=c(2,0.7,0))
+
+# Posterior histogram:
+paramInfo = plotPost( acceptedTraj , xlim=c(0,1) , xlab=bquote(theta) , 
+                      cex.main=2.0 ,
+                      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                      "Eff.Sz." == .(round(effectiveSize(acceptedTraj),1)) ) ) )
+
+
+# Trajectory, a.k.a. trace plot, end of chain:
+idxToPlot = (trajLength-100):trajLength
+plot( trajectory[idxToPlot] , idxToPlot , main="End of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Display proposal SD and acceptance ratio in the plot.
+text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 ,
+      labels = bquote( frac(N[acc],N[pro]) == 
+                       .(signif( nAccepted/length(acceptedTraj) , 3 ))))
+
+# Trajectory, a.k.a. trace plot, beginning of chain:
+idxToPlot = 1:100
+plot( trajectory[idxToPlot] , idxToPlot , main="Beginning of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Indicate burn in limit (might not be visible if not in range):
+if ( burnIn > 0 ) {
+  abline(h=burnIn,lty="dotted")
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) )
+}
+```
+The posterior distribution does make sense because it is a combination between the trimodal prior and the likelihood function.
+
+
+d) Repeat the previous part but now with proposal SD=0.02. Include the graphical output in your write-up. Does the posterior distribution make sense? Explain why not; what has gone wrong? If we did not know from the previous part that this output was unrepresentative of the true posterior, how could we try to check? 
+```{r}
+myData = c(0,1,1)
+
+
+# Define the Bernoulli likelihood function, p(D|theta).
+# The argument theta could be a vector, not just a scalar.
+likelihood = function( theta , data ) {
+  z = sum( data )
+  N = length( data )
+  pDataGivenTheta = theta^z * (1-theta)^(N-z)
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The likelihood for theta > 1 or for theta < 0 is zero:
+  pDataGivenTheta[ theta > 1 | theta < 0 ] = 0
+  return( pDataGivenTheta )
+}
+
+# Define the prior density function. 
+prior = function( theta ) {
+  #pTheta = dbeta( theta , 1 , 1 )
+  pTheta = ((cos(4 * pi * theta) + 1)^2) / 1.5
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The prior for theta > 1 or for theta < 0 is zero:
+  pTheta[ theta > 1 | theta < 0 ] = 0
+  return( pTheta )
+}
+
+# Define the relative probability of the target distribution, 
+# as a function of vector theta. For our application, this
+# target distribution is the unnormalized posterior distribution.
+targetRelProb = function( theta , data ) {
+  targetRelProb =  likelihood( theta , data ) * prior( theta )
+  return( targetRelProb )
+}
+
+# Specify the length of the trajectory, i.e., the number of jumps to try:
+trajLength = 50000 # arbitrary large number
+# Initialize the vector that will store the results:
+trajectory = rep( 0 , trajLength )
+# Specify where to start the trajectory:
+trajectory[1] = 0.01 # arbitrary value
+# Specify the burn-in period:
+burnIn = ceiling( 0.0 * trajLength ) # arbitrary number, less than trajLength
+# Initialize accepted, rejected counters, just to monitor performance:
+nAccepted = 0
+nRejected = 0
+
+# Now generate the random walk. The 't' index is time or trial in the walk.
+# Specify seed to reproduce same random walk:
+set.seed(47405)
+# Specify standard deviation of proposal distribution:
+proposalSD = 0.02
+for ( t in 1:(trajLength-1) ) {
+	currentPosition = trajectory[t]
+	# Use the proposal distribution to generate a proposed jump.
+	proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+	# Compute the probability of accepting the proposed jump.
+	probAccept = min( 1,
+		targetRelProb( currentPosition + proposedJump , myData )
+		/ targetRelProb( currentPosition , myData ) )
+	# Generate a random uniform value from the interval [0,1] to
+	# decide whether or not to accept the proposed jump.
+	if ( runif(1) < probAccept ) {
+		# accept the proposed jump
+		trajectory[ t+1 ] = currentPosition + proposedJump
+		# increment the accepted counter, just to monitor performance
+		if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+	} else {
+		# reject the proposed jump, stay at current position
+		trajectory[ t+1 ] = currentPosition
+		# increment the rejected counter, just to monitor performance
+		if ( t > burnIn ) { nRejected = nRejected + 1 }
+	}
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+
+# End of Metropolis algorithm.
+
+#-----------------------------------------------------------------------
+# Display the chain.
+
+#openGraph(width=4,height=8)
+layout( matrix(1:3,nrow=3) )
+par(mar=c(3,4,2,1),mgp=c(2,0.7,0))
+
+# Posterior histogram:
+paramInfo = plotPost( acceptedTraj , xlim=c(0,1) , xlab=bquote(theta) , 
+                      cex.main=2.0 ,
+                      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                      "Eff.Sz." == .(round(effectiveSize(acceptedTraj),1)) ) ) )
+
+
+# Trajectory, a.k.a. trace plot, end of chain:
+idxToPlot = (trajLength-100):trajLength
+plot( trajectory[idxToPlot] , idxToPlot , main="End of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Display proposal SD and acceptance ratio in the plot.
+text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 ,
+      labels = bquote( frac(N[acc],N[pro]) == 
+                       .(signif( nAccepted/length(acceptedTraj) , 3 ))))
+
+# Trajectory, a.k.a. trace plot, beginning of chain:
+idxToPlot = 1:100
+plot( trajectory[idxToPlot] , idxToPlot , main="Beginning of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Indicate burn in limit (might not be visible if not in range):
+if ( burnIn > 0 ) {
+  abline(h=burnIn,lty="dotted")
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) )
+}
+```
+The posterior does not really make sense because it shows a single peak close to theta=0 even though the data has two ones. This is because the initial value of the chain is close to theta=0 and the SD is small. 
+If we did not know from the previous part that this output was unrepresentative of the true posterior, we could start chains at different starting positions and check that they all converged to the same region.
+
+
+e) Repeat the previous part but now with the initial position at 0.99. In conjunction with the previous part, what does this result tell us?
+```{r}
+# Define the Bernoulli likelihood function, p(D|theta).
+# The argument theta could be a vector, not just a scalar.
+likelihood = function( theta , data ) {
+  z = sum( data )
+  N = length( data )
+  pDataGivenTheta = theta^z * (1-theta)^(N-z)
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The likelihood for theta > 1 or for theta < 0 is zero:
+  pDataGivenTheta[ theta > 1 | theta < 0 ] = 0
+  return( pDataGivenTheta )
+}
+
+# Define the prior density function. 
+prior = function( theta ) {
+  #pTheta = dbeta( theta , 1 , 1 )
+  pTheta = ((cos(4 * pi * theta) + 1)^2) / 1.5
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The prior for theta > 1 or for theta < 0 is zero:
+  pTheta[ theta > 1 | theta < 0 ] = 0
+  return( pTheta )
+}
+
+# Define the relative probability of the target distribution, 
+# as a function of vector theta. For our application, this
+# target distribution is the unnormalized posterior distribution.
+targetRelProb = function( theta , data ) {
+  targetRelProb =  likelihood( theta , data ) * prior( theta )
+  return( targetRelProb )
+}
+
+# Specify the length of the trajectory, i.e., the number of jumps to try:
+trajLength = 50000 # arbitrary large number
+# Initialize the vector that will store the results:
+trajectory = rep( 0 , trajLength )
+# Specify where to start the trajectory:
+trajectory[1] = 0.99 # arbitrary value
+# Specify the burn-in period:
+burnIn = ceiling( 0.0 * trajLength ) # arbitrary number, less than trajLength
+# Initialize accepted, rejected counters, just to monitor performance:
+nAccepted = 0
+nRejected = 0
+
+# Now generate the random walk. The 't' index is time or trial in the walk.
+# Specify seed to reproduce same random walk:
+set.seed(47405)
+# Specify standard deviation of proposal distribution:
+proposalSD = 0.02
+for ( t in 1:(trajLength-1) ) {
+	currentPosition = trajectory[t]
+	# Use the proposal distribution to generate a proposed jump.
+	proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+	# Compute the probability of accepting the proposed jump.
+	probAccept = min( 1,
+		targetRelProb( currentPosition + proposedJump , myData )
+		/ targetRelProb( currentPosition , myData ) )
+	# Generate a random uniform value from the interval [0,1] to
+	# decide whether or not to accept the proposed jump.
+	if ( runif(1) < probAccept ) {
+		# accept the proposed jump
+		trajectory[ t+1 ] = currentPosition + proposedJump
+		# increment the accepted counter, just to monitor performance
+		if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+	} else {
+		# reject the proposed jump, stay at current position
+		trajectory[ t+1 ] = currentPosition
+		# increment the rejected counter, just to monitor performance
+		if ( t > burnIn ) { nRejected = nRejected + 1 }
+	}
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+
+# End of Metropolis algorithm.
+
+#-----------------------------------------------------------------------
+# Display the chain.
+
+#openGraph(width=4,height=8)
+layout( matrix(1:3,nrow=3) )
+par(mar=c(3,4,2,1),mgp=c(2,0.7,0))
+
+# Posterior histogram:
+paramInfo = plotPost( acceptedTraj , xlim=c(0,1) , xlab=bquote(theta) , 
+                      cex.main=2.0 ,
+                      main=bquote( list( "Prpsl.SD" == .(proposalSD) ,
+                      "Eff.Sz." == .(round(effectiveSize(acceptedTraj),1)) ) ) )
+
+
+# Trajectory, a.k.a. trace plot, end of chain:
+idxToPlot = (trajLength-100):trajLength
+plot( trajectory[idxToPlot] , idxToPlot , main="End of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Display proposal SD and acceptance ratio in the plot.
+text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 ,
+      labels = bquote( frac(N[acc],N[pro]) == 
+                       .(signif( nAccepted/length(acceptedTraj) , 3 ))))
+
+# Trajectory, a.k.a. trace plot, beginning of chain:
+idxToPlot = 1:100
+plot( trajectory[idxToPlot] , idxToPlot , main="Beginning of Chain" ,
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" ,
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 )
+# Indicate burn in limit (might not be visible if not in range):
+if ( burnIn > 0 ) {
+  abline(h=burnIn,lty="dotted")
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) )
+}
+```
+When the trajectory starts at theta = 0.99 the chain stays in near theta = 1. This tells us that the results are not representative of the posterior as they are so influenced by an abitrary theta value. 
+
+
+**Problem 3**
+
+Recall that one way to estimate the bias of a coin using the Bayesian approach is by modeling the series of coin flips as i.i.d. Bernoulli trials, and using the beta distribution to model its prior.
+
+
+a) What do the Beta distribution parameters `a` and `b` represent in the context of our prior belief about the bias of a coin? 
+
+The parameters `a` and `b` represent how biased we think the coin is before flipping it where a-1 represents the number of heads and b-1 represents the number of tails. If we believe we have a fair coin before we flip, a will equal b. Likewise if we believe the coin is biased in favor of heads, a will be greater than b. 
+
+b) Suppose we have a data set of $N$ coin flips where we observed $z$ heads, assuming the prior distribution is Beta with parameters $a$ and $b$, what can we say about the mean and the mode for the resulting posterior distribution? 
+
+The mean for the resulting prior distribution is $\frac{z + a}{N + a + b}$
+The mode can be found at the maximum point of the prior distribution.
+
+
+c) For exercise, make sure the scripts named `DBDA2E-utilities.R` and `hw2_mcmc_generation_jags.R` are loaded in your Rstudio environment. Add comments to each line of the following code, evaluate the results, and confirm that the conclusion from part `b)` is consistent in our numerical example (hint: look at the attributes from `chain_summary`). 
+
+_Please note that, in the case the value $p$ dictates how many heads we should be getting in our simulated data (observed trials), which is used to generate the likelihood function, $p$ is not to be confused with $z$ which is the number of heads we get in our observed trials._ 
+
+```{r, eval=FALSE}
+library(rjags)
+library(coda)
+
+HDIofMCMC = function( sampleVec , credMass=0.95 ) {
+  # Computes highest density interval from a sample of representative values,
+  #   estimated as shortest credible interval.
+  # Arguments:
+  #   sampleVec
+  #     is a vector of representative values from a probability distribution.
+  #   credMass
+  #     is a scalar between 0 and 1, indicating the mass within the credible
+  #     interval that is to be estimated.
+  # Value:
+  #   HDIlim is a vector containing the limits of the HDI
+  sortedPts = sort( sampleVec )
+  ciIdxInc = ceiling( credMass * length( sortedPts ) )
+  nCIs = length( sortedPts ) - ciIdxInc
+  ciWidth = rep( 0 , nCIs )
+  for ( i in 1:nCIs ) {
+    ciWidth[ i ] = sortedPts[ i + ciIdxInc ] - sortedPts[ i ]
+  }
+  HDImin = sortedPts[ which.min( ciWidth ) ]
+  HDImax = sortedPts[ which.min( ciWidth ) + ciIdxInc ]
+  HDIlim = c( HDImin , HDImax )
+  return( HDIlim )
+}
+
+
+
+DbdaAcfPlot = function( codaObject , parName=varnames(codaObject)[1] , plColors=NULL ) {
+  if ( all( parName != varnames(codaObject) ) ) { 
+    stop("parName must be a column name of coda object")
+  }
+  nChain = length(codaObject)
+  if ( is.null(plColors) ) plColors=1:nChain
+  xMat = NULL
+  yMat = NULL
+  for ( cIdx in 1:nChain ) {
+    acfInfo = acf(codaObject[,c(parName)][[cIdx]],plot=FALSE) 
+    xMat = cbind(xMat,acfInfo$lag)
+    yMat = cbind(yMat,acfInfo$acf)
+  }
+  matplot( xMat , yMat , type="o" , pch=20 , col=plColors , ylim=c(0,1) ,
+           main="" , xlab="Lag" , ylab="Autocorrelation" )
+  abline(h=0,lty="dashed")
+  EffChnLngth = effectiveSize(codaObject[,c(parName)])
+  text( x=max(xMat) , y=max(yMat) , adj=c(1.0,1.0) , cex=1.25 ,
+        labels=paste("ESS =",round(EffChnLngth,1)) )
+}
+
+DbdaDensPlot = function( codaObject , parName=varnames(codaObject)[1] , plColors=NULL ) {
+  if ( all( parName != varnames(codaObject) ) ) { 
+    stop("parName must be a column name of coda object")
+  }
+  nChain = length(codaObject) # or nchain(codaObject)
+  if ( is.null(plColors) ) plColors=1:nChain
+  xMat = NULL
+  yMat = NULL
+  hdiLims = NULL
+  for ( cIdx in 1:nChain ) {
+    densInfo = density(codaObject[,c(parName)][[cIdx]]) 
+    xMat = cbind(xMat,densInfo$x)
+    yMat = cbind(yMat,densInfo$y)
+    hdiLims = cbind(hdiLims,HDIofMCMC(codaObject[,c(parName)][[cIdx]]))
+  }
+  matplot( xMat , yMat , type="l" , col=plColors , 
+           main="" , xlab="Param. Value" , ylab="Density" )
+  abline(h=0)
+  points( hdiLims[1,] , rep(0,nChain) , col=plColors , pch="|" )
+  points( hdiLims[2,] , rep(0,nChain) , col=plColors , pch="|" )
+  text( mean(hdiLims) , 0 , "95% HDI" , adj=c(0.5,-0.2) )
+  EffChnLngth = effectiveSize(codaObject[,c(parName)])
+  MCSE = sd(as.matrix(codaObject[,c(parName)]))/sqrt(EffChnLngth) 
+  text( max(xMat) , max(yMat) , adj=c(1.0,1.0) , cex=1.25 ,
+        paste("MCSE =\n",signif(MCSE,3)) )
+}
+
+
+diagMCMC = function( codaObject , parName=varnames(codaObject)[1] ,
+                     saveName=NULL , saveType="jpg" ) {
+  DBDAplColors = c("skyblue","black","royalblue","steelblue")
+  #openGraph(height=5,width=7)
+  par( mar=0.5+c(3,4,1,0) , oma=0.1+c(0,0,2,0) , mgp=c(2.25,0.7,0) , 
+       cex.lab=1.5 )
+  layout(matrix(1:4,nrow=2))
+  # traceplot and gelman.plot are from CODA package:
+  require(coda)
+  coda::traceplot( codaObject[,c(parName)] , main="" , ylab="Param. Value" ,
+                   col=DBDAplColors ) 
+  tryVal = try(
+    coda::gelman.plot( codaObject[,c(parName)] , main="" , auto.layout=FALSE , 
+                       col=DBDAplColors )
+  )  
+  # if it runs, gelman.plot returns a list with finite shrink values:
+  if ( class(tryVal)=="try-error" ) {
+    plot.new() 
+    print(paste0("Warning: coda::gelman.plot fails for ",parName))
+  } else { 
+    if ( class(tryVal)=="list" & !is.finite(tryVal$shrink[1]) ) {
+      plot.new() 
+      print(paste0("Warning: coda::gelman.plot fails for ",parName))
+    }
+  }
+  DbdaAcfPlot(codaObject,parName,plColors=DBDAplColors)
+  DbdaDensPlot(codaObject,parName,plColors=DBDAplColors)
+  mtext( text=parName , outer=TRUE , adj=c(0.5,0.5) , cex=2.0 )
+  if ( !is.null(saveName) ) {
+    saveGraph( file=paste0(saveName,"Diag",parName), type=saveType)
+  }
+}
+
+summarizePost = function( paramSampleVec , 
+                          compVal=NULL , ROPE=NULL , credMass=0.95 ) {
+  meanParam = mean( paramSampleVec )
+  medianParam = median( paramSampleVec )
+  dres = density( paramSampleVec )
+  modeParam = dres$x[which.max(dres$y)]
+  mcmcEffSz = round( effectiveSize( paramSampleVec ) , 1 )
+  names(mcmcEffSz) = NULL
+  hdiLim = HDIofMCMC( paramSampleVec , credMass=credMass )
+  if ( !is.null(compVal) ) {
+    pcgtCompVal = ( 100 * sum( paramSampleVec > compVal ) 
+                    / length( paramSampleVec ) )
+  } else {
+    compVal=NA
+    pcgtCompVal=NA
+  }
+  if ( !is.null(ROPE) ) {
+    pcltRope = ( 100 * sum( paramSampleVec < ROPE[1] ) 
+                 / length( paramSampleVec ) )
+    pcgtRope = ( 100 * sum( paramSampleVec > ROPE[2] ) 
+                 / length( paramSampleVec ) )
+    pcinRope = 100-(pcltRope+pcgtRope)
+  } else { 
+    ROPE = c(NA,NA)
+    pcltRope=NA 
+    pcgtRope=NA 
+    pcinRope=NA 
+  }  
+  return( c( Mean=meanParam , Median=medianParam , Mode=modeParam , 
+             ESS=mcmcEffSz ,
+             HDImass=credMass , HDIlow=hdiLim[1] , HDIhigh=hdiLim[2] , 
+             CompVal=compVal , PcntGtCompVal=pcgtCompVal , 
+             ROPElow=ROPE[1] , ROPEhigh=ROPE[2] ,
+             PcntLtROPE=pcltRope , PcntInROPE=pcinRope , PcntGtROPE=pcgtRope ) )
+}
+
+
+# Jags-Ydich-Xnom1subj-Mbernbeta.R 
+# Accompanies the book:
+#   Kruschke, J. K. (2014). Doing Bayesian Data Analysis: 
+#   A Tutorial with R, JAGS, and Stan. 2nd Edition. Academic Press / Elsevier.
+#source("DBDA2E-utilities.R")
+#===============================================================================
+# modified to include the beta distribution parameters, a and b, as optional variables
+
+genMCMC = function( data , numSavedSteps=50000 , saveName=NULL, a = 1, b = 1 ) { 
+  require(rjags)
+  #-----------------------------------------------------------------------------
+  # THE DATA.
+  if ( class(data)=="data.frame" ) {  # If data is a data.frame
+    y = myData$y                      # then pull out the column named y
+  } else {                            # else
+    y = data                          # rename the data as y.
+  }
+  # Do some checking that data make sense:
+  if ( any( y!=0 & y!=1 ) ) { stop("All y values must be 0 or 1.") }
+  Ntotal = length(y)
+  # Specify the data in a list, for later shipment to JAGS:
+  dataList = list(
+    y = y ,
+    Ntotal = Ntotal 
+  )
+  #-----------------------------------------------------------------------------
+  # THE MODEL.
+  modelString = paste0("
+  model {
+    for ( i in 1:Ntotal ) {
+      y[i] ~ dbern( theta )
+    }
+    theta ~ dbeta( ",a,", ", b," )
+  }
+  ")
+  # close quote for modelString
+  writeLines( modelString , con="TEMPmodel.txt" )
+  #-----------------------------------------------------------------------------
+  # INTIALIZE THE CHAINS.
+  # Initial values of MCMC chains based on data:
+  # Option 1: Use single initial value for all chains:
+  #  thetaInit = sum(y)/length(y)
+  #  initsList = list( theta=thetaInit )
+  # Option 2: Use function that generates random values for each chain:
+  initsList = function() {
+    resampledY = sample( y , replace=TRUE )
+    thetaInit = sum(resampledY)/length(resampledY)
+    thetaInit = 0.001+0.998*thetaInit # keep away from 0,1
+    return( list( theta=thetaInit ) )
+  }
+  #-----------------------------------------------------------------------------
+  # RUN THE CHAINS
+  parameters = c( "theta")     # The parameters to be monitored
+  adaptSteps = 500             # Number of steps to adapt the samplers
+  burnInSteps = 500            # Number of steps to burn-in the chains
+  nChains = 4                  # nChains should be 2 or more for diagnostics 
+  thinSteps = 1
+  nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains )
+  # Create, initialize, and adapt the model:
+  jagsModel = jags.model( "TEMPmodel.txt" , data=dataList , inits=initsList , 
+                          n.chains=nChains , n.adapt=adaptSteps )
+  # Burn-in:
+  cat( "Burning in the MCMC chain...\n" )
+  update( jagsModel , n.iter=burnInSteps )
+  # The saved MCMC chain:
+  cat( "Sampling final MCMC chain...\n" )
+  codaSamples = coda.samples( jagsModel , variable.names=parameters , 
+                              n.iter=nIter , thin=thinSteps )
+  # resulting codaSamples object has these indices: 
+  #   codaSamples[[ chainIdx ]][ stepIdx , paramIdx ]
+  if ( !is.null(saveName) ) {
+    save( codaSamples , file=paste(saveName,"Mcmc.Rdata",sep="") )
+  }
+  return( codaSamples )
+} # end function
+
+#===============================================================================
+
+smryMCMC = function(  codaSamples , compVal=NULL , rope=NULL , saveName=NULL ) {
+  summaryInfo = NULL
+  mcmcMat = as.matrix(codaSamples,chains=TRUE)
+  summaryInfo = rbind( summaryInfo , 
+                       "theta" = summarizePost( mcmcMat[,"theta"] , 
+                                             compVal=compVal , ROPE=rope ) )
+  if ( !is.null(saveName) ) {
+    write.csv( summaryInfo , file=paste(saveName,"SummaryInfo.csv",sep="") )
+  }
+  show( summaryInfo )
+  return( summaryInfo )
+}
+
+#===============================================================================
+
+plotMCMC = function( codaSamples , data , compVal=NULL , rope=NULL , 
+                     saveName=NULL , showCurve=FALSE , saveType="jpg" ) {
+  # showCurve is TRUE or FALSE and indicates whether the posterior should
+  #   be displayed as a histogram (by default) or by an approximate curve.
+  #-----------------------------------------------------------------------------
+  mcmcMat = as.matrix(codaSamples,chains=TRUE)
+  chainLength = NROW( mcmcMat )
+  theta = mcmcMat[,"theta"]
+  #-----------------------------------------------------------------------------
+  # Set up window and layout:
+  #openGraph(width=4.0,height=3.0)
+  par( mar=c(3.5,0.5,2.5,0.5) , mgp=c(2.25,0.7,0) )
+  #-----------------------------------------------------------------------------
+  postInfo = plotPost( theta , cex.lab = 1.75 , 
+                       showCurve=showCurve ,
+                       compVal=compVal , ROPE=rope , cex.main=1.5 ,
+                       xlab=bquote(theta) , main=paste("theta") , 
+                       col="skyblue" )
+  z = sum(data$y)
+  N = length(data$y)
+  points( z/N , 0 , pch="+" , col="red" , cex=3 )
+  text( max(theta) , 0 , bquote( z==.(z) ) , adj=c(1,-11) ) 
+  text( max(theta) , 0 , bquote( N==.(N) ) , adj=c(1,-9.5) ) 
+  
+  #-----------------------------------------------------------------------------  
+  if ( !is.null(saveName) ) {
+    saveGraph( file=paste(saveName,"Post",sep=""), type=saveType)
+  }
+}
+
+#===============================================================================
+
+
+
+
+# Load the functions genMCMC, smryMCMC, and plotMCMC:
+#source("hw2_mcmc_generation_jags.R")
+
+## initial example 
+p <-0.1
+
+n <- 10
+
+#create dataset of 10 samples in binomial distributon, size of 1, probability of 0.1
+myData <-  rbinom(n,1,p)
+
+#sum dataset
+z <- sum(myData)
+
+
+
+
+#generate mcmc simulation with data created above 
+mcmcCoda = genMCMC( data=myData , numSavedSteps=10000, a = 30, b =50 )
+
+# Display diagnostics of the Markov chain in the MCMC simulation, 
+# for specified parameter theta:
+diagMCMC( mcmcCoda , parName="theta" )
+
+# Display numerical summary statistics of chain:
+chain_summary <-  smryMCMC( mcmcCoda )
+
+```
+It does seem our results are consistent with part b as seen in the chain summary output. 
+
+d) Repeat part c), but with a set of different values of $n$ ranging from 2 to 1000, you can pick 5 or 6 of them spaced across the interval. Collect the summary value for each case of $n.$ Demonstrate the effect on the posterior mean and mode in each case via a summary table or a plot. 
+```{r}
+p <-0.1
+n1 <- 2
+myData <-  rbinom(n1,1,p)
+#generate mcmc simulation with data created above 
+mcmcCoda = genMCMC( data=myData , numSavedSteps=10000, a = 30, b =50 )
+
+# Display numerical summary statistics of chain:
+chain_summary1 <-  smryMCMC( mcmcCoda )
+
+
+
+n2 <- 50
+myData <-  rbinom(n2,1,p)
+#generate mcmc simulation with data created above 
+mcmcCoda = genMCMC( data=myData , numSavedSteps=10000, a = 30, b =50 )
+
+# Display numerical summary statistics of chain:
+chain_summary2 <-  smryMCMC( mcmcCoda )
+
+
+n3 <- 500
+myData <-  rbinom(n3,1,p)
+#generate mcmc simulation with data created above 
+mcmcCoda = genMCMC( data=myData , numSavedSteps=10000, a = 30, b =50 )
+
+# Display numerical summary statistics of chain:
+chain_summary3 <-  smryMCMC( mcmcCoda )
+
+n4 <- 777
+myData <-  rbinom(n4,1,p)
+#generate mcmc simulation with data created above 
+mcmcCoda = genMCMC( data=myData , numSavedSteps=10000, a = 30, b =50 )
+
+# Display numerical summary statistics of chain:
+chain_summary4 <-  smryMCMC( mcmcCoda )
+
+
+n5 <- 1000
+myData <-  rbinom(n5,1,p)
+#generate mcmc simulation with data created above 
+mcmcCoda = genMCMC( data=myData , numSavedSteps=10000, a = 30, b =50 )
+
+# Display numerical summary statistics of chain:
+chain_summary5 <-  smryMCMC( mcmcCoda )
+
+
+n_values <- c(n1, n2, n3, n4, n5)
+mean_values <- c(chain_summary1[,c(1)], chain_summary2[,c(1)], chain_summary3[,c(1)], chain_summary4[,c(1)], chain_summary5[,c(1)])
+mode_values <- c(chain_summary1[,c(3)], chain_summary2[,c(3)], chain_summary3[,c(3)], chain_summary4[,c(3)], chain_summary5[,c(3)])
+
+mean_mode_summary <- data.frame(n_values, mean_values, mode_values)
+
+mean_mode_summary
+```
+

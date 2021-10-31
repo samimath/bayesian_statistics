@@ -1,0 +1,138 @@
+---
+title: "Lecture 5 code"
+output:
+  html_document:
+    toc: true
+    theme: united
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+graphics.off()
+rm(list=ls(all=TRUE))
+knitr::opts_chunk$set(echo = TRUE)
+# General setup ----------------------------------------------------------------
+cat("\014")  # Clear console
+rm(list=ls()) # Delete all variables
+graphics.off() # Close all open plots
+source("DBDA2E-utilities.R")
+```
+
+Both examples follow the script from Kruschke, J. K. (2015). Doing Bayesian Data Analysis, Second Edition:\nA Tutorial with R, JAGS, and Stan. Academic Press / Elsevier. Please note, in order to run this notebook you'll need to include the files `DBDA2E-utilities.R` and `BernGrid.R` which can be found in `DBDA2Eprograms.zip` uploaded on Canvas.
+
+# Example 1: Using the Metropolis algorithm to estimatee a posterior distribution
+
+### Specifying data to set up the likelihood function, and the prior distribution
+
+```{r,warning=FALSE}
+
+
+# Specify the data, to be used in the likelihood function.
+myData = c(rep(0,6),rep(1,10),rep(0,8))
+
+# Define the Bernoulli likelihood function, p(D|theta).
+# The argument theta could be a vector, not just a scalar.
+likelihood = function( theta , data ) {
+  # z = total number of heads
+  z = sum( data )
+  # N = number of trials
+  N = length( data )
+  # Mathematical model of the Bernoulli trial
+  pDataGivenTheta = theta^z * (1-theta)^(N-z)
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The likelihood for theta > 1 or for theta < 0 is zero:
+  
+  pDataGivenTheta[ theta > 1 | theta < 0 ] = 0
+  
+  return( pDataGivenTheta )
+}
+
+# Define the prior density function. 
+prior = function( theta ) {
+  # specifying the beta distribution for the prior
+  pTheta = dbeta( theta , 1 , 1 )
+  
+  # The theta values passed into this function are generated at random,
+  # and therefore might be inadvertently greater than 1 or less than 0.
+  # The prior for theta > 1 or for theta < 0 is zero:
+  
+  pTheta[ theta > 1 | theta < 0 ] = 0
+  
+  return( pTheta )
+}
+
+# Define the relative probability of the target distribution, 
+# as a function of vector theta. For our application, this
+# target distribution is the unnormalized posterior distribution.
+targetRelProb = function( theta , data ) {
+  
+  targetRelProb =  likelihood( theta , data ) * prior( theta )
+  
+  return( targetRelProb )
+}
+
+
+
+```
+
+
+### Defining steps for the Metropolis algorithm
+
+```{r}
+
+
+# Specify the length of the trajectory, i.e., the number of jumps to try:
+trajLength = 50000 # arbitrary large number
+# Initialize the vector that will store the results:
+trajectory = rep( 0 , trajLength )
+# Specify where to start the trajectory:
+trajectory[1] = 0.01 # arbitrary value
+# Specify the burn-in period:
+burnIn = ceiling( 0.0 * trajLength ) # arbitrary number, less than trajLength
+# Initialize accepted, rejected counters, just to monitor performance:
+nAccepted = 0
+nRejected = 0
+
+# Now generate the random walk. The 't' index is time or trial in the walk.
+# Specify seed to reproduce same random walk:
+set.seed(47405)
+# Specify standard deviation of proposal distribution:
+
+proposalSD = c(0.02,0.2,2.0)[2]
+
+for ( t in 1:(trajLength-1) ) {
+  
+  currentPosition = trajectory[t]
+  
+  # Use the proposal distribution to generate a proposed jump.
+  proposedJump = rnorm( 1 , mean=0 , sd=proposalSD )
+  
+  # Compute the probability of accepting the proposed jump.
+  probAccept = min( 1,
+                    targetRelProb( currentPosition + proposedJump , myData )
+                    / targetRelProb( currentPosition , myData ) )
+  # Generate a random uniform value from the interval [0,1] to
+  # decide whether or not to accept the proposed jump.
+  if ( runif(1) < probAccept ) {
+    # accept the proposed jump
+    trajectory[ t+1 ] = currentPosition + proposedJump
+    # increment the accepted counter, just to monitor performance
+    if ( t > burnIn ) { nAccepted = nAccepted + 1 }
+  } else {
+    # reject the proposed jump, stay at current position
+    trajectory[ t+1 ] = currentPosition
+    # increment the rejected counter, just to monitor performance
+    if ( t > burnIn ) { nRejected = nRejected + 1 }
+  }
+}
+
+# Extract the post-burnIn portion of the trajectory.
+acceptedTraj = trajectory[ (burnIn+1) : length(trajectory) ]
+```
+
+
+
+
+
+

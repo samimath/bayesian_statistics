@@ -1,0 +1,55 @@
+---
+title: "Solution to Quiz 1"
+author: "U20 Math 559 Spring 2021"
+date: "3/13/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1. 
+
+### Answer: This is a Frequentist approach
+
+**Reasoning**: The approach here takes the expected value of observed frequency to measure the unknown, and its conclusion does not include any prior belief
+
+
+## Problem 2. 
+
+
+### Guide to answer: 
+
+Key point to construct a Bayesian approach: probabaility assigned to the asnwer with the 'keyword' should receive more weight based on our subjective belief
+
+
+## Problem 3.
+
+### Answer:
+
+Let $EQ$ = Earthquake and $LS$ = Landslide. We know the following:
+
+* $p(EQ) = 0.25 \implies p(EQ^c) = 0.75$
+* $p(LS|EQ) = 0.9$
+* $p(LS|EQ^c) = 0.15$
+
+We would like to find $p(LS|EQ)$. Now, since $p(LS|EQ) = p(EQ,LS)/p(LS)$, and 
+\[p(LS) = \underbrace{p(LS|EQ)p(EQ) + p(LS|EQ^c)p(EQ^c)}_{\text{total probability law}} \implies p(LS) = 0.225+0.1125 = 0.3375 = 2/3\]
+
+## Problem 4.
+
+### Answer
+
+We are given the mathematical model for one observation:
+\[p(x|\sigma) = \frac{x}{\sigma} \exp \{-\frac{x^2}{2\sigma^2}\}\]
+
+where $x >0$ and $\sigma >0,$ and $\sigma$ is the unknown variable we would like to estimate. Now, let $D = \{X_1,X_2,\dots, X_n\}$ be the i.i.d. variables representing the data, we can construct the likelihood function as 
+\[p(D|\sigma) = \Pi_{i=1}^{n}p(x_i|\sigma) = \frac{\Pi_{i=1}^{n} x_i}{\sigma^{2n}}\exp\{\frac{\sum_{i=1}^{n}x^2_i}{2\sigma^2}\}\]
+
+To calculate the posterior, notice that $p(\sigma|D) \propto p(D|\sigma)p(\sigma)$ is a conjugate of its prior, so they have the same form, but different parameter values:
+
+\[ p(D|\sigma)p(\sigma)  \propto \sigma^{-(2b-2n+1)} \exp\{-\frac{a+\sum_{i=1}^{n}x^2_i}{2\sigma^2}\} = \sigma^{-(2(b+n)+1)} \exp\{-\frac{a+\sum_{i=1}^{n}x^2_i}{2\sigma^2}\}\]
+
+Therefore, $p(\sigma|D) \sim SqIG(a+\sum_{i=1}^{n}x^2_i,b+n)$
+

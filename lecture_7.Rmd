@@ -1,0 +1,306 @@
+---
+title: "Hierarchical model with JAGS"
+author: "Sami Cheong"
+date: "3/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(rjags)
+require(coda)
+source("Jags-Ydich-XnomSsubj-MbernBetaOmegaKappa.R")
+source("DBDA2E-utilities.R")
+```
+
+## Part A: JAGS Basics
+
+
+### A1.  Data Assembly and Building Model Object
+
+```{r}
+
+
+## 1. Data Assembly
+## Suppose in this case we have a series of coin flips. We can use rbinom to simulate that:
+
+y <-  rbinom(1,10,0.1)
+
+## create the list object:
+
+Ntotal = length(y)  # Compute the total number of flips.
+dataList = list(    # Put the information into a list.
+  y=y,
+  Ntotal = Ntotal
+)
+
+```
+
+
+```{r}
+## defining model string
+
+modelString <-"
+model {
+  for ( i in 1:Ntotal){
+   y[i] ~ dbern( theta )
+  
+  }
+  
+  theta ~ dbeta( 1, 1 )
+
+} 
+
+"
+writeLines( modelString , con="TEMPmodel.txt" ) # write to file
+```
+
+### A2. Set up initial value for theta 
+
+```{r}
+# set up initial value for theta 
+thetaInit = sum(y)/length(y)
+# put initial theta in a list object
+initsList = list( theta=thetaInit )
+
+## Define jagsModel
+jagsModel = jags.model( file="TEMPmodel.txt" , data=dataList , inits=initsList ,
+                        n.chains=3 , n.adapt=500 )
+
+
+## Alternatively, we can generate a random value for the initial list using the following function:
+
+initsList = function(y) {
+  resampledY = sample( y , replace=TRUE )        # resample values from y
+  thetaInit = sum(resampledY)/length(resampledY) # compute proportion (MLE)
+  thetaInit = 0.001+0.998*thetaInit              # keep away from 0,1
+  return( list( theta=thetaInit ) )              # return as a named list
+}
+```
+
+### A3. Generating Markov Chains
+
+```{r}
+
+
+jagsModel2 = jags.model( file="TEMPmodel.txt" , data=dataList , inits=initsList(dataList$y) ,
+                        n.chains=3 , n.adapt=500 )
+
+## 2. Generating a Markov chain: After JAGS has created its model, we tell it to run the chains some number of steps to accomplish burn in.  
+## recompile model:
+update(object = jagsModel2,n.iter = 500)
+
+# in case of error for recompile, use this: jagsModel2$recompile()
+
+codaSamples = rjags::coda.samples( model = jagsModel2 , variable.names=c("theta") ,
+                            n.iter=2000 )
+```
+
+### A4. Analyzing Markov Chains through Visualizations
+```{r}
+
+
+
+### 3. Visualizing the Markov chain
+
+
+### try out some coda function
+
+### set color vec: 
+
+color_vec <- c('#43A5A4','#4E3ACB','#1BAF8B','#2E5458','#2FC44F','#10595D','#0DCADD')
+
+### cumulative quantle plot
+
+
+coda::cumuplot(codaSamples[[1]],col = color_vec,probs = c(0.1,0.5,0.9))
+  
+
+
+
+### traceplot:
+
+traceplot(codaSamples[,'theta'],col = color_vec)
+
+
+### densty plot:
+
+coda::densplot(codaSamples,col='blue')
+
+
+### auto-correlation function plot: shows serial correlation of theta over time
+
+coda::acfplot(codaSamples,col=color_vec,ylim=c(-0.1,1.1))
+
+
+coda::autocorr.plot(codaSamples)
+
+```
+
+## Part B: Modeling Example with Real Data 
+
+From the text book:
+"_Therapeutic touch is a nursing technique in which the practitioner manually manipulates the “energy field” of a patient who is suffering from a disease. The practitioner holds her or his hands near but not actually touching the patient, and repatterns the energy field to relieve congestion and restore balance, allowing the body to heal. Rosa, Rosa, Sarner, and Barrett (1998) reported that therapeutic touch has been widely taught and widely used in nursing colleges and hospitals despite there being little if any evidence of its efficacy."
+
+Claim:
+
+- practitioners can sense a body’s energy field.
+
+Experiment:
+
+- The practitioner sat with her hands extended through cutouts in a cardboard screen, which prevented the practitioner from seeing the experimenter. On each trial, the experimenter flipped a coin and held her hand a few centimeters above one or the other of the practitioner’s hands, as dictated by the flip of the coin. 
+
+- The practitioner then responded with her best guess regarding which of her hand’s was being hovered over. Each trial was scored as correct or wrong. The experimenter (and co-author of the article) was 9-years old at the time.
+
+https://www.physics.smu.edu/pseudo/AlternativeMedicine/Rosa.pdf
+
+## B.1 Read in the data:
+
+```{r}
+
+# Read the data file:
+data = read.csv("TherapeuticTouchData.csv")
+# Load the relevant model functions into R’s working memory:
+
+# y = observed responses
+y = data[,"y"]
+# s = groups
+s = as.numeric(factor(data[,"s"])) 
+
+# set data and group size:
+Ntotal = length(y)
+Nsubj = length(unique(s))
+
+
+```
+
+
+### B.2. Assemble data list:
+
+
+```{r}
+# set data list :
+
+dataList = list(
+    y = y ,
+    s = s ,
+    Ntotal = Ntotal ,
+    Nsubj = Nsubj
+  )
+```
+
+
+### B.3 Define model
+
+```{r}
+# create hierarchcial model:
+
+modelString = "
+  model {
+    for ( i in 1:Ntotal ) {
+    # top level: y is a Bernoulli random varable
+      y[i] ~ dbern( theta[s[i]] )
+    }
+    for ( sIdx in 1:Nsubj ) {
+    # for each group, designate a different theta with beta distribution
+      theta[sIdx] ~ dbeta( omega*(kappa-2)+1 , (1-omega)*(kappa-2)+1 ) 
+    }
+    # parameter for the beta distribution
+    omega ~ dbeta( 1 , 1 ) # broad uniform
+    # omega ~ dbeta( 5001 , 15001 ) # Skeptical prior for ESP
+    # more hierarchy for kappa
+    kappa <- kappaMinusTwo + 2
+    # kappaMinusTwo ~ dgamma( 0.01 , 0.01 )  # mean=1 , sd=10 (generic vague)
+    kappaMinusTwo ~ dgamma( 1.105125 , 0.1051249 )  # mode=1 , sd=10 
+    # kappaMinusTwo ~ dgamma( 36 , 0.12 )  # mode=300 , sd=50 : skeptical 
+  }"
+
+writeLines( modelString , con="TEMPmodel_BHM.txt" )
+```
+
+## B.4 Initial values of MCMC chains based on data:
+
+```{r}
+
+
+### initial theta (a list of 28 - 1 theta for each group)
+thetaInit = rep(0,Nsubj)
+for ( sIdx in 1:Nsubj ) { # for each subject
+  
+  includeRows = ( s == sIdx ) # identify rows of this subject
+  
+  yThisSubj = y[includeRows]  # extract data of this subject
+  
+  resampledY = sample( yThisSubj , replace=TRUE ) # resample
+  
+  thetaInit[sIdx] = sum(resampledY)/length(resampledY) 
+}
+
+# ensure there are no values that are exactly 0 for computational purposes:
+
+thetaInit = 0.001+0.998*thetaInit
+
+### initial omega:
+
+omegaInit <-  mean(thetaInit)
+
+
+### initial kappaMinusTwo - set some random value and see what happens
+
+kappaMinusTwoInit <- 100
+
+initsList <-list(theta = thetaInit,  omega= omegaInit, kappaMinusTwo = kappaMinusTwoInit)
+```
+
+### B.5 Initialize parameters and build the chainn
+
+
+```{r}
+
+parameters = c( "theta","omega","kappa") # The parameters to be monitored
+adaptSteps = 500             # Number of steps to adapt the samplers
+burnInSteps = 500            # Number of steps to burn-in the chains
+nChains = 4       # nChains should be 2 or more for diagnostics 
+numSavedSteps = 50000  # Number of steps to save in the MC
+thinSteps = 1
+nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains )
+# Create, initialize, and adapt the model:
+jagsModel = jags.model( "TEMPmodel_BHM.txt" , data=dataList , inits=initsList , 
+                        n.chains=nChains , n.adapt=adaptSteps )
+# Burn-in:
+cat( "Burning in the MCMC chain...\n" )
+update( jagsModel , n.iter=burnInSteps )
+# The saved MCMC chain:
+cat( "Sampling final MCMC chain...\n" )
+codaSamples = rjags::coda.samples( jagsModel , variable.names=parameters , 
+                            n.iter=nIter , thin=thinSteps )
+
+#View(smryMCMC(codaSamples))
+
+
+
+```
+
+
+
+
+### B.3. Visualizing results:
+
+
+```{r}
+
+mcmcMat <- as.matrix(codaSamples,chains = TRUE)
+postKappa <-   plotPost( mcmcMat[,"kappa"] , compVal=NULL , ROPE=NULL ,
+                       xlab=bquote(kappa) , main="" , 
+                       xlim=c( min(mcmcMat[,"kappa"]),
+                               quantile(mcmcMat[,"kappa"],probs=c(0.990)) ) )
+
+
+postOmega <- plotPost( mcmcMat[,"theta[28]"] , compVal=0.5 , ROPE=NULL ,
+                       xlab=bquote(theta) , main="Group Mode" ,
+                       xlim=quantile(mcmcMat[,"theta[28]"],probs=c(0.005,0.995)) )
+
+
+
+
+```

@@ -1,0 +1,69 @@
+---
+title: "Stochastic Processes Final Project"
+author: "U20 Math 559, Spring 2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Objective 
+
+For our final project, you will be asked to apply Bayesian analysis to a topic of your choice. Choose an analysis-friendly dataset where Bayesian analysis would be a good fit.
+
+Some ideas:
+
+* Investigate the 'Classical' (such as least-square estimate) vs the 'Bayesian' approach to estimating linear model coefficients
+
+* Experiment with different types of prior distributions and study their impact on the resulting Bayesian analysis (in this case, you could also simulate your own data)
+
+* Build a predictive hierarchical model to understand which factors are most important to a problem you are interested in
+
+## Detailed guideline
+
+While you are not expected to build a computationally complex model, your work needs to show logical flow, and demonstrates the Bayesian analysis concepts discussed in the course. This includes the following:
+
+1. *Description of the problem:* What is the problem you are trying to solve? What is the motivation and significance behind this? Why might Bayesian approach be useful here?
+
+2. *Description of your data:* What are the variables of interest and their summary? What are some caveats of the data (such as data quality issues) that we need to be aware of, if any?
+
+3. *Formulation of your analysis approach:* How is the model defined? How do you describe each of the Bayesian component in your approach (prior, likelihood, and posterior distribution)? 
+
+4. *Computational approach:* What methods are you using to analyze the data? You are encouraged to use `rjags` to define the model.
+
+5. *Results and conclusion:* What is the takeaway from your analysis? What makes Bayesian analysis advantageous (or challenging) in your problem? What are the next steps in your analysis?
+
+6. *References:* Citation of references and data sources (if applicable)
+
+
+## Format
+
+The project will be divided into 3 parts:
+
+1. Outline (5pt): Please describe the problem of your choice and an initial outline of the steps you plan on taking to complete the project.
+
+
+2. Write-up (20 pt): Please prepare a detailed write-up (5-8 pages) of your project that addresses the points listed under the `Detailed guideline` section.
+
+Please submit all portions of your project on Canvas. Links will be available before due dates.
+
+## Timeline 
+
+The following are the key due dates for the project:
+
+- **Wednesday, 4/28/2021** : Outline of final project
+
+- **Sunday, 5/9/2021**: Write-up of final project 
+
+
+## References 
+
+Please take a look at some [*examples*](https://wustl.instructure.com/courses/66229/pages/links-to-relevant-readings?module_item_id=719528) on our Canvas site for inspiration. In general, a goggle search will give you plenty of good ideas to start with.
+
+## Writing and communication guidelines
+
+Please keep your project write-up as concise as you can. Please write your paper in the style of a professional report, which means it is important to check the flow of your work to make sure it is coherent, include any exhibitions to facilitate your ideas, and cite all sources properly. For styling, you are highly encouraged to use LaTeX or Rmarkdown to type up the project, but Word is acceptable as well. 
+
+
